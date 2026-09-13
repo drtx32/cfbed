@@ -1,6 +1,0 @@
-{
-  "project_id": "6547eaae-8dbc-4220-a07c-2b62b6a89cfb",
-  "project_title": "CLI / MCP Dev",
-  "project_description": "Build reusable CLI-first integrations. Current first target: CloudFlare ImgBed official API. Keep each CLI useful on its own; MCP compatibility should come from clean machine-readable output and typed-output conventions, not from product-specific coupling to a particular gateway.",
-  "resources": []
-}
