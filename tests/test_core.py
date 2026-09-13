@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from cfbed.core import Client, encoded_url, encrypt_token, decrypt_token
+from cfbed.core import Client, encoded_url, encrypt_token, decrypt_token, USER_AGENT
 
 def test_encoded_url_only_encodes_path():
     assert encoded_url("https://x.test/a folder/猫.png?q=a b") == "https://x.test/a%20folder/%E7%8C%AB.png?q=a b"
@@ -33,3 +33,19 @@ def test_mcp_image_shape():
         def read(self): return b"webp-bytes"
     status, headers, body=Client("https://api.test", None, lambda req: Response()).download("x/a b.webp")
     assert status == 200 and headers["Content-Type"] == "image/webp" and body == b"webp-bytes"
+
+
+def test_requests_include_project_user_agent():
+    class Response:
+        status = 200; headers = {}
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def read(self): return b"{}"
+
+    seen = {}
+    def opener(req):
+        seen.update(req.headers)
+        return Response()
+
+    Client("https://api.test", None, opener).request("GET", "/api/manage/list")
+    assert seen["User-agent"] == USER_AGENT
