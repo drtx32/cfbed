@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cfbed"
+version = "0.1.0"
+description = "CLI for the CloudFlare ImgBed API with secure local credentials, generic file operations, and machine-readable output."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = ["cryptography>=42"]
+
+[project.scripts]
+cfbed = "cfbed.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cfbed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
