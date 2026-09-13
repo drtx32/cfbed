@@ -19,6 +19,8 @@ def parser():
     u=sub.add_parser("upload"); u.add_argument("file", type=Path); u.add_argument("--directory"); u.add_argument("--filename"); u.add_argument("--name-type", choices=["default","origin","index","short"]); u.add_argument("--channel"); u.add_argument("--format", choices=["human","json","mcp"], default="human")
     for name in ["info","get","url","delete"]:
         x=sub.add_parser(name); x.add_argument("path"); x.add_argument("--format", choices=["human","json","mcp"], default="human")
+    sub.choices["get"].add_argument("--output", type=Path, help="write bytes to this path")
+    sub.choices["get"].add_argument("--stdout", action="store_true", help="write bytes to stdout (default outside MCP mode)")
     x=sub.add_parser("list"); x.add_argument("path", nargs="?", default=None); x.add_argument("--format", choices=["human","json","mcp"], default="human")
     sub.choices["url"].add_argument("--encoded", action="store_true")
     m=sub.add_parser("move"); m.add_argument("src"); m.add_argument("dst"); m.add_argument("--format", choices=["human","json"], default="human")
@@ -49,7 +51,11 @@ def main(argv=None):
                 if mime.startswith("image/"): emit({"result":{"content":[{"type":"image","mimeType":mime,"data":base64.b64encode(body).decode()}]}}, "json")
                 elif mime.startswith("text/"): emit({"result":{"content":[{"type":"text","text":body.decode("utf-8")}]}}, "json")
                 else: emit({"result":{"content":[{"type":"resource","resource":{"uri":base+"/file/"+args.path,"mimeType":mime}}]}}, "json")
-            else: sys.stdout.buffer.write(body)
+            else:
+                if args.output:
+                    args.output.write_bytes(body)
+                    if args.format == "json": emit({"output": str(args.output), "content_type": mime, "size": len(body)}, "json")
+                elif args.stdout or not args.output: sys.stdout.buffer.write(body)
             return 0
         if args.command == "delete": emit(client.delete(args.path), args.format); return 0
         if args.command in ("move","rename"): emit(client.move(args.src, args.dst) if args.command=="move" else client.move(args.path, str(Path(args.path).parent / args.new_name)), args.format); return 0
