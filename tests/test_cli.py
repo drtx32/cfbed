@@ -184,19 +184,22 @@ class FakeListClient:
         ]
 
 
-def test_list_human_is_a_rich_table_and_json_contract_is_unchanged(monkeypatch, capsys):
+def test_list_human_table_is_the_tree_fallback_and_json_contract_is_unchanged(monkeypatch, capsys):
     monkeypatch.setattr(cli, "credentials", lambda: ("https://api.test", None))
     monkeypatch.setattr(cli, "Client", FakeListClient)
 
-    assert cli.main(["list"]) == 0
-    human = capsys.readouterr().out
-    assert "Name" in human
-    assert "Type/MIME" in human
-    assert "Size" in human
-    assert "Modified" in human
-    assert "📁 docs" in human
-    assert "📄 readme.md" in human
-    assert not human.lstrip().startswith("[")
+    for args in (["list"], ["list", "--format", "human"]):
+        assert cli.main(args) == 0
+        human = capsys.readouterr().out
+        # Flat entries are not a useful Tree, so Table is the required
+        # human-readable fallback and must never become a JSON dump.
+        assert "Name" in human
+        assert "Type/MIME" in human
+        assert "Size" in human
+        assert "Modified" in human
+        assert "📁 docs" in human
+        assert "📄 readme.md" in human
+        assert not human.lstrip().startswith("[")
 
     assert cli.main(["list", "--format", "json"]) == 0
     machine = capsys.readouterr().out
