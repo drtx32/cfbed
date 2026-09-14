@@ -278,3 +278,11 @@ def test_upload_mcp_format_is_an_envelope(monkeypatch, capsys):
     envelope = json.loads(capsys.readouterr().out)
     assert envelope["result"]["content"][0]["type"] == "text"
     assert json.loads(envelope["result"]["content"][0]["text"])["source_file"] == "report.html"
+
+
+def test_upload_url_failure_is_printed_once_without_traceback(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "download_to_temp", lambda url: (_ for _ in ()).throw(cli.CfbedError("download failed: test", 2)))
+    assert cli.main(["upload", "https://example.test/report.md"]) == 2
+    error = capsys.readouterr().err
+    assert error == "cfbed: download failed: test\n"
+    assert "Traceback" not in error

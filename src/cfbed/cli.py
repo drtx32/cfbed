@@ -178,7 +178,7 @@ def _run(action, fmt: str = "human") -> None:
             print(json.dumps({"error": str(exc), "code": getattr(exc, "code", 1)}), file=sys.stderr)
         else:
             print(f"cfbed: {exc}", file=sys.stderr)
-        raise
+        raise typer.Exit(code=getattr(exc, "code", 1))
 
 
 def _client() -> tuple[str, Optional[str], Client]:
