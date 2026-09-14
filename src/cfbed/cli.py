@@ -317,7 +317,10 @@ def upload(
                 upload_path, directory, filename or (source_name if content is not None or temp_path else None),
                 name_type, channel, content_type=content_type, source_file=source_name,
             )
-            emit(result, fmt)
+            if fmt == "mcp":
+                emit({"result": {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]}}, "json")
+            else:
+                emit(result, fmt)
         finally:
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)

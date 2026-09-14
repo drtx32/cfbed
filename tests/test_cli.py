@@ -264,3 +264,17 @@ def test_upload_content_stdin_mode_is_real_cli_boundary(monkeypatch, capsys):
     assert cli.main(["upload", "site.html", "--content", "-"]) == 0
     assert seen == {"filename": "site.html", "body": "<main>你好\n世界</main>".encode()}
     assert '"size"' in capsys.readouterr().out
+
+
+def test_upload_mcp_format_is_an_envelope(monkeypatch, capsys):
+    class FakeUploadClient:
+        def __init__(self, *args): pass
+        def upload(self, path, directory, filename, name_type, channel, **kwargs):
+            return {"source_file": kwargs["source_file"], "size": path.stat().st_size}
+
+    monkeypatch.setattr(cli, "credentials", lambda: ("https://api.test", None))
+    monkeypatch.setattr(cli, "Client", FakeUploadClient)
+    assert cli.main(["upload", "report.html", "--content", "hello", "--format", "mcp"]) == 0
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["result"]["content"][0]["type"] == "text"
+    assert json.loads(envelope["result"]["content"][0]["text"])["source_file"] == "report.html"
