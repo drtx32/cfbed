@@ -122,3 +122,95 @@ def test_version():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
     assert result.stdout.strip() == "0.1.0"
+
+
+@pytest.mark.parametrize("argv", [[], ["config"], ["auth"]])
+def test_bare_groups_render_help_without_traceback(capsys, argv):
+    assert cli.main(argv) == 0
+    output = capsys.readouterr()
+    combined = output.out + output.err
+    assert "Usage:" in combined
+    assert "Traceback" not in combined
+    assert "NoArgsIsHelpError" not in combined
+
+
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        (["upload"], "Missing argument 'file'"),
+        (["info"], "Missing argument 'path'"),
+        (["url"], "Missing argument 'path'"),
+        (["get"], "Missing argument 'path'"),
+        (["move"], "Missing argument 'src'"),
+        (["rename"], "Missing argument 'path'"),
+        (["delete"], "Missing argument 'path'"),
+        (["config", "set-base-url"], "Missing argument 'url'"),
+    ],
+)
+def test_missing_required_arguments_are_normal_usage_errors(capsys, argv, expected):
+    assert cli.main(argv) == 2
+    output = capsys.readouterr()
+    combined = output.out + output.err
+    assert expected in combined
+    assert "Traceback" not in combined
+    assert "Error" in combined
+
+
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        (["not-a-command"], "No such command"),
+        (["doctor", "--not-an-option"], "No such option"),
+        (["upload", "--name-type", "invalid", "missing.file"], "Invalid value"),
+    ],
+)
+def test_invalid_cli_input_has_no_traceback(capsys, argv, expected):
+    assert cli.main(argv) == 2
+    output = capsys.readouterr()
+    combined = output.out + output.err
+    assert expected in combined
+    assert "Traceback" not in combined
+    assert "Usage:" in combined
+
+
+class FakeListClient:
+    def __init__(self, *args):
+        pass
+
+    def list(self, path=None):
+        return [
+            {"name": "docs", "type": "directory", "modified": "2026-09-14"},
+            {"name": "readme.md", "mime": "text/markdown", "size": 42, "modified": "2026-09-13"},
+        ]
+
+
+def test_list_human_table_is_the_tree_fallback_and_json_contract_is_unchanged(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "credentials", lambda: ("https://api.test", None))
+    monkeypatch.setattr(cli, "Client", FakeListClient)
+
+    for args in (["list"], ["list", "--format", "human"]):
+        assert cli.main(args) == 0
+        human = capsys.readouterr().out
+        # Flat entries are not a useful Tree, so Table is the required
+        # human-readable fallback and must never become a JSON dump.
+        assert "Name" in human
+        assert "Type/MIME" in human
+        assert "Size" in human
+        assert "Modified" in human
+        assert "📁 docs" in human
+        assert "📄 readme.md" in human
+        assert not human.lstrip().startswith("[")
+
+    assert cli.main(["list", "--format", "json"]) == 0
+    machine = capsys.readouterr().out
+    assert '"name": "readme.md"' in machine
+    assert machine.lstrip().startswith("[")
+
+
+def test_list_human_alias_is_a_normal_usage_error(capsys):
+    assert cli.main(["list", "--human"]) == 2
+    output = capsys.readouterr()
+    combined = output.out + output.err
+    assert "Error: No such option: --human" in combined
+    assert "Traceback" not in combined
+    assert "NoSuchOption" not in combined

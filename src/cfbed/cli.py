@@ -31,6 +31,13 @@ from pathlib import Path
 from typing import List, Optional
 
 import typer
+from rich.console import Console
+from rich.table import Table
+from typer._click.exceptions import (
+    ClickException,
+    NoArgsIsHelpError,
+    UsageError,
+)
 
 from . import __version__
 from .core import (
@@ -66,6 +73,56 @@ def emit(value, fmt: str = "human") -> None:
         print(json.dumps(value, ensure_ascii=False, indent=2))
     else:
         print(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2))
+
+
+def _list_entries(value) -> list[dict]:
+    """Extract list entries while leaving the API response untouched for JSON."""
+    if isinstance(value, list):
+        return [entry if isinstance(entry, dict) else {"name": str(entry)} for entry in value]
+    if isinstance(value, dict):
+        for key in ("entries", "items", "files", "data", "result"):
+            nested = value.get(key)
+            if isinstance(nested, list):
+                return [entry if isinstance(entry, dict) else {"name": str(entry)} for entry in nested]
+        return [value]
+    return [{"name": str(value)}]
+
+
+def _entry_value(entry: dict, *keys):
+    for key in keys:
+        value = entry.get(key)
+        if value is not None and value != "":
+            return value
+    return None
+
+
+def _render_list_human(value) -> None:
+    """Render list results as a compact table, showing only supplied metadata."""
+    entries = _list_entries(value)
+    columns = ["Name"]
+    if any(_entry_value(e, "type", "kind", "mime", "mime_type", "content_type", "contentType") is not None for e in entries):
+        columns.append("Type/MIME")
+    if any(_entry_value(e, "size", "bytes", "content_length", "contentLength") is not None for e in entries):
+        columns.append("Size")
+    if any(_entry_value(e, "modified", "modified_at", "modifiedAt", "updated_at", "updatedAt", "last_modified", "lastModified") is not None for e in entries):
+        columns.append("Modified")
+
+    table = Table(*columns, show_header=True, header_style="bold cyan", expand=False)
+    for entry in entries:
+        is_directory = _entry_value(entry, "is_dir", "isDir", "directory", "folder") is True
+        entry_type = _entry_value(entry, "type", "kind")
+        is_directory = is_directory or str(entry_type).lower() in {"dir", "directory", "folder"}
+        name = _entry_value(entry, "name", "path", "key", "src") or ""
+        name = ("📁 " if is_directory else "📄 ") + str(name)
+        row = [name]
+        if "Type/MIME" in columns:
+            row.append(str(_entry_value(entry, "mime", "mime_type", "content_type", "contentType", "type", "kind") or ""))
+        if "Size" in columns:
+            row.append(str(_entry_value(entry, "size", "bytes", "content_length", "contentLength") or ""))
+        if "Modified" in columns:
+            row.append(str(_entry_value(entry, "modified", "modified_at", "modifiedAt", "updated_at", "updatedAt", "last_modified", "lastModified") or ""))
+        table.add_row(*row)
+    Console(file=sys.stdout, force_terminal=False, color_system=None).print(table)
 
 
 def _format_option(help_text: str = "输出格式：human（终端）、json（稳定 JSON）或 mcp（MCP envelope）。") -> str:
@@ -211,7 +268,13 @@ def list_files(
 ) -> None:
     """列出远端目录；path 接受 ImgBed 目录路径或 slash 形式。"""
     fmt = output_format
-    _run(lambda: emit(_client()[2].list(path), fmt), fmt)
+    def action() -> None:
+        result = _client()[2].list(path)
+        if fmt == "human":
+            _render_list_human(result)
+        else:
+            emit(result, fmt)
+    _run(action, fmt)
 
 
 @app.command("info")
@@ -411,6 +474,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         if code is None:
             code = getattr(exc, "code", 0)
         return int(code or 0)
+    except NoArgsIsHelpError as exc:
+        # With standalone_mode=False Typer does not render this normal help
+        # flow itself; it propagates the parser exception to the caller.
+        # Render it through Click's normal formatter instead of Rich's
+        # pretty-exception traceback.  This also covers nested groups.
+        exc.show()
+        return 0
+    except UsageError as exc:
+        # Missing arguments, unknown commands/options, and bad parameter
+        # values are all ordinary CLI usage errors and should keep Click's
+        # usage/error/exit-code contract.
+        exc.show()
+        return int(exc.exit_code)
+    except ClickException as exc:
+        exc.show()
+        return int(exc.exit_code)
+    except typer.Abort:
+        print("Aborted!", file=sys.stderr)
+        return 1
     except (CfbedError, OSError, ValueError) as exc:
         code = getattr(exc, "code", 1)
         print(f"cfbed: {exc}", file=sys.stderr)
