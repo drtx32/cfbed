@@ -1,8 +1,10 @@
 from __future__ import annotations
 import argparse, base64, getpass, json, mimetypes, sys
+import urllib.parse
+from email.message import Message
 from pathlib import Path
 from . import __version__
-from .core import Client, CfbedError, config_public, credentials, clear_token, encoded_url, set_base_url, set_token
+from .core import Client, CfbedError, classify_response, config_public, credentials, clear_token, encoded_url, set_base_url, set_token
 
 def emit(value, fmt="human"):
     if fmt == "json": print(json.dumps(value, ensure_ascii=False, indent=2))
@@ -61,16 +63,28 @@ def main(argv=None):
             url=args.path if args.path.startswith("http") else base + "/file/" + "/".join(__import__("urllib.parse", fromlist=["quote"]).quote(p, safe="") for p in args.path.strip("/").split("/"))
             emit(encoded_url(url) if getattr(args, "encoded", False) else url, args.format); return 0
         if args.command == "get":
-            _, headers, body=client.download(args.path); mime=headers.get("Content-Type", "application/octet-stream").split(";",1)[0]
+            _, headers, body=client.download(args.path); kind, mime = classify_response(200, headers)
+            disposition = headers.get("Content-Disposition", "")
+            filename = None
+            if disposition:
+                msg = Message(); msg["Content-Disposition"] = disposition; filename = msg.get_filename()
+            filename = filename or Path(urllib.parse.unquote(args.path.rstrip("/")).split("/")[-1]).name or "download.bin"
             if args.format == "mcp":
                 if mime.startswith("image/"): emit({"result":{"content":[{"type":"image","mimeType":mime,"data":base64.b64encode(body).decode()}]}}, "json")
-                elif mime.startswith("text/"): emit({"result":{"content":[{"type":"text","text":body.decode("utf-8")}]}}, "json")
-                else: emit({"result":{"content":[{"type":"resource","resource":{"uri":base+"/file/"+args.path,"mimeType":mime}}]}}, "json")
+                elif kind == "text": emit({"result":{"content":[{"type":"text","text":body.decode("utf-8", "replace")}]}}, "json")
+                else: emit({"result":{"content":[{"type":"resource","resource":{"uri":base+"/file/"+args.path,"mimeType":mime,"size":len(body)}}]}}, "json")
             else:
                 if args.output:
                     args.output.write_bytes(body)
-                    if args.format == "json": emit({"output": str(args.output), "content_type": mime, "size": len(body)}, "json")
-                elif args.stdout or not args.output: sys.stdout.buffer.write(body)
+                    emit({"output": str(args.output), "content_type": mime, "size": len(body)}, args.format)
+                elif args.stdout:
+                    if sys.stdout.isatty(): raise CfbedError("refusing to write binary data to a TTY; use --output FILE")
+                    sys.stdout.buffer.write(body)
+                elif kind == "text":
+                    sys.stdout.write(body.decode("utf-8", "replace"))
+                else:
+                    output = Path(filename); output.write_bytes(body)
+                    print(f"saved {len(body)} bytes ({mime}) to {output}")
             return 0
         if args.command == "delete": emit(client.delete(args.path), args.format); return 0
         if args.command in ("move","rename"): emit(client.move(args.src, args.dst) if args.command=="move" else client.move(args.path, str(Path(args.path).parent / args.new_name)), args.format); return 0

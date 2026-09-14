@@ -26,6 +26,28 @@ class CfbedError(Exception):
         self.code = code
 
 
+TEXTUAL_MIME_TYPES = {
+    "application/json", "application/ld+json", "application/xml", "application/xhtml+xml",
+    "application/javascript", "application/x-javascript", "application/sql",
+    "application/markdown", "application/x-markdown", "application/yaml", "application/rtf",
+}
+
+
+def classify_response(status: int, headers) -> tuple[str, str]:
+    """Return (text|binary, normalized MIME type) without inspecting the body."""
+    mime = (headers.get("Content-Type") or "application/octet-stream").split(";", 1)[0].strip().lower()
+    textual = mime.startswith("text/") or mime in TEXTUAL_MIME_TYPES or mime.endswith("+json") or mime.endswith("+xml")
+    return ("text" if textual else "binary"), mime
+
+
+def _api_error(status: int, headers, body: bytes) -> CfbedError:
+    kind, mime = classify_response(status, headers)
+    if kind == "text":
+        detail = body.decode("utf-8", "replace").strip()[:500]
+        return CfbedError(f"API error {status}: {detail or 'empty response'}", 2)
+    return CfbedError(f"API error {status}: binary response ({mime}, {len(body)} bytes)", 2)
+
+
 def _secure_dir() -> None:
     CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(CONFIG_DIR, 0o700)
@@ -138,10 +160,12 @@ class Client:
         try:
             with self.opener(request) as response:
                 body = response.read()
+                if response.status >= 400:
+                    raise _api_error(response.status, response.headers, body)
                 return response.status, dict(response.headers), body
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace")[:500]
-            raise CfbedError(f"API error {exc.code}: {detail}", 2)
+            body = exc.read()
+            raise _api_error(exc.code, exc.headers or {}, body)
         except urllib.error.URLError as exc:
             raise CfbedError(f"network error: {exc.reason}", 2)
 
