@@ -10,6 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from . import __version__
@@ -18,6 +19,7 @@ CONFIG_DIR = Path(os.environ.get("CFBED_CONFIG_DIR", Path.home() / ".cache" / "c
 CONFIG_FILE = CONFIG_DIR / "config.json"
 KEY_FILE = CONFIG_DIR / "secret.key"
 USER_AGENT = f"cfbed/{__version__} (+https://github.com/drtx32/cfbed)"
+DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 
 
 class CfbedError(Exception):
@@ -143,6 +145,69 @@ def encoded_url(url: str) -> str:
     return urllib.parse.urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
 
 
+def _safe_download_name(value: str | None) -> str | None:
+    """Return a usable basename, rejecting path-like or control-heavy values."""
+    if not value:
+        return None
+    value = value.strip().replace("\\", "/")
+    name = urllib.parse.unquote(value).rsplit("/", 1)[-1]
+    if not name or name in {".", ".."} or any(ord(char) < 32 for char in name):
+        return None
+    return name[:255]
+
+
+def _remote_filename(url: str, headers) -> str:
+    content_disposition = headers.get("Content-Disposition")
+    if content_disposition:
+        # Message.get_filename handles quoted names and RFC 2231 filename*.
+        from email.message import Message
+
+        message = Message()
+        message["content-disposition"] = content_disposition
+        name = _safe_download_name(message.get_filename())
+        if name:
+            return name
+    name = _safe_download_name(urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1])
+    return name or "download"
+
+
+def download_to_temp(url: str) -> tuple[Path, str, str | None]:
+    """Stream a remote source to a temporary file and return path/name/MIME."""
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise CfbedError("source URL must be an http(s) URL", 1)
+    request = urllib.request.Request(url, headers={"Accept": "*/*", "User-Agent": USER_AGENT})
+    try:
+        response = urllib.request.urlopen(request)
+        with response:
+            if getattr(response, "status", 200) >= 400:
+                raise CfbedError(f"download failed: HTTP {response.status}", 2)
+            headers = response.headers
+            name = _remote_filename(url, headers)
+            content_type = (headers.get("Content-Type") or "").split(";", 1)[0].strip() or None
+            suffix = Path(name).suffix
+            with NamedTemporaryFile(prefix="cfbed-upload-", suffix=suffix, delete=False) as target:
+                temp_path = Path(target.name)
+                try:
+                    while True:
+                        chunk = response.read(DOWNLOAD_CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        target.write(chunk)
+                except Exception:
+                    temp_path.unlink(missing_ok=True)
+                    raise
+            return temp_path, name, content_type
+    except CfbedError:
+        raise
+    except urllib.error.HTTPError as exc:
+        raise CfbedError(f"download failed: HTTP {exc.code}", 2)
+    except urllib.error.URLError as exc:
+        raise CfbedError(f"download failed: {exc.reason}", 2)
+    except OSError as exc:
+        raise CfbedError(f"download failed: {exc}", 2)
+
+
 class Client:
     def __init__(self, base_url: str, token: str | None, opener=urllib.request.urlopen):
         self.base_url, self.token, self.opener = base_url.rstrip("/"), token, opener
@@ -169,9 +234,9 @@ class Client:
         except urllib.error.URLError as exc:
             raise CfbedError(f"network error: {exc.reason}", 2)
 
-    def upload(self, file: Path, directory=None, filename=None, name_type=None, channel=None, return_format="full"):
+    def upload(self, file: Path, directory=None, filename=None, name_type=None, channel=None, return_format="full", content_type=None, source_file=None):
         boundary = "----cfbed-" + secrets.token_hex(12)
-        content_type = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
+        content_type = content_type or mimetypes.guess_type(file.name)[0] or "application/octet-stream"
         name = filename or file.name
         payload = file.read_bytes()
         def field(key, value):
@@ -181,7 +246,7 @@ class Client:
         result = json.loads(raw)
         item = result[0] if isinstance(result, list) and result else result
         public = item.get("publicUrl") or (self.base_url + item.get("src", ""))
-        return {"source_file": str(file), "directory": directory, "stored_name": item.get("src"), "public_url": public, "encoded_url": encoded_url(public), "content_type": content_type, "size": len(payload)}
+        return {"source_file": source_file or str(file), "directory": directory, "stored_name": item.get("src"), "public_url": public, "encoded_url": encoded_url(public), "content_type": content_type, "size": len(payload)}
 
     def download(self, path: str):
         safe_path = "/".join(urllib.parse.quote(urllib.parse.unquote(p), safe="") for p in path.lstrip("/").split("/"))

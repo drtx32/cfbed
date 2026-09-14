@@ -24,7 +24,9 @@ from __future__ import annotations
 import base64
 import getpass
 import json
+import mimetypes
 import sys
+import tempfile
 import urllib.parse
 from datetime import datetime, timezone
 from email.message import Message
@@ -51,6 +53,7 @@ from .core import (
     encoded_url,
     set_base_url,
     set_token,
+    download_to_temp,
 )
 
 
@@ -267,7 +270,8 @@ def _format_callback_hj(value: str) -> str:
 
 @app.command("upload")
 def upload(
-    file: Path = typer.Argument(..., exists=True, readable=True, help="要上传的任意文件路径。"),
+    file: str = typer.Argument(..., help="本地文件路径、http(s) URL，或 --content 模式下的目标文件名。"),
+    content: Optional[str] = typer.Option(None, "--content", help="直接上传文本内容；使用 - 从 stdin 读取 UTF-8 文本。"),
     directory: Optional[str] = typer.Option(None, help="远端目录；ImgBed 的 uploadFolder。"),
     filename: Optional[str] = typer.Option(None, help="远端文件名；默认使用本地文件名。"),
     name_type: Optional[str] = typer.Option(
@@ -284,11 +288,41 @@ def upload(
         help=_format_option(),
     ),
 ) -> None:
-    """上传任意文件，并返回 public URL、编码 URL、MIME 与大小。"""
+    """上传本地文件、远程 URL，或直接上传 UTF-8 文本内容。"""
     if name_type not in (None, "default", "origin", "index", "short"):
         raise typer.BadParameter("must be one of: default, origin, index, short", param_hint="--name-type")
     fmt = output_format
-    _run(lambda: emit(_client()[2].upload(file, directory, filename, name_type, channel), fmt), fmt)
+
+    def action() -> None:
+        temp_path: Optional[Path] = None
+        source_name = file
+        content_type = None
+        try:
+            if content is not None:
+                text = sys.stdin.read() if content == "-" else content
+                with tempfile.NamedTemporaryFile(prefix="cfbed-content-", suffix=Path(file).suffix, delete=False) as target:
+                    temp_path = Path(target.name)
+                    target.write(text.encode("utf-8"))
+                upload_path = temp_path
+                content_type = mimetypes.guess_type(file)[0]
+            elif urllib.parse.urlsplit(file).scheme in ("http", "https"):
+                temp_path, inferred_name, content_type = download_to_temp(file)
+                source_name = inferred_name
+                upload_path = temp_path
+            else:
+                upload_path = Path(file)
+                if not upload_path.is_file():
+                    raise CfbedError(f"local file not found: {file}", 1)
+            result = _client()[2].upload(
+                upload_path, directory, filename or (source_name if content is not None or temp_path else None),
+                name_type, channel, content_type=content_type, source_file=source_name,
+            )
+            emit(result, fmt)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+
+    _run(action, fmt)
 
 
 @app.command("list")

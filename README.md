@@ -32,6 +32,9 @@ Configuration is stored under `~/.cache/cfbed/` with mode `0700`. The token is e
 
 ```bash
 cfbed upload site/index.html --directory static-sites --name-type origin --format json
+cfbed upload https://example.com/report.pdf --directory downloads --format json
+cfbed upload report.md --content "# Generated report\n\n你好" --directory downloads
+printf '<h1>Generated</h1>' | cfbed upload report.html --content - --directory static-sites
 cfbed list static-sites --format json
 cfbed info static-sites/index.html --format json
 cfbed url static-sites/index.html --encoded
@@ -45,6 +48,8 @@ cfbed delete archive/final.pdf
 ```
 
 `upload` returns `source_file`, `directory`, `stored_name`, `public_url` exactly as returned by ImgBed (or its documented `src` fallback), `encoded_url`, `content_type`, and `size`. URL encoding applies to path segments only, so schemes, hosts, and query strings remain intact. `--name-type`, `--channel`, and `--directory` are command flags, not persistent defaults.
+
+`upload` accepts a local path or an `http(s)` URL. URLs are downloaded with redirects to a temporary file, using a trusted `Content-Disposition` filename when available and otherwise the URL basename. `--filename` overrides that name. With `--content`, the positional value is the destination filename rather than a local path; `--content -` reads UTF-8 text from stdin.
 
 The CLI is built with [Typer](https://typer.tiangolo.com/), so `cfbed --help`, `cfbed <command> --help`, and `cfbed <group> <sub> --help` all render a Rich-formatted Usage / Options / Commands screen with one-line descriptions for every flag.
 

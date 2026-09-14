@@ -2,7 +2,7 @@ import json
 import urllib.error
 from pathlib import Path
 import pytest
-from cfbed.core import Client, CfbedError, classify_response, encoded_url, encrypt_token, decrypt_token, USER_AGENT
+from cfbed.core import Client, CfbedError, classify_response, download_to_temp, encoded_url, encrypt_token, decrypt_token, USER_AGENT
 
 def test_encoded_url_only_encodes_path():
     assert encoded_url("https://x.test/a folder/猫.png?q=a b") == "https://x.test/a%20folder/%E7%8C%AB.png?q=a b"
@@ -73,3 +73,43 @@ def test_text_http_error_is_readable():
 ])
 def test_response_classification(mime, kind):
     assert classify_response(200, {"Content-Type": mime}) == (kind, mime.split(";", 1)[0])
+
+
+def test_download_to_temp_streams_and_uses_content_disposition(tmp_path):
+    class Response:
+        status = 200
+        headers = {"Content-Type": "text/html; charset=utf-8", "Content-Disposition": "attachment; filename*=UTF-8''%E4%B8%AD%E6%96%87.html"}
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self, size=-1):
+            return b"<h1>" if size else b""
+
+    # A finite response also proves the implementation does not call read() once
+    # with an unbounded size.
+    chunks = iter([b"<h1>", "中文".encode(), b"</h1>", b""])
+    Response.read = lambda self, size=-1: next(chunks)
+    import cfbed.core as core
+    original = core.urllib.request.urlopen
+    core.urllib.request.urlopen = lambda request: Response()
+    try:
+        path, name, mime = download_to_temp("https://example.test/path/original",)
+    finally:
+        core.urllib.request.urlopen = original
+    try:
+        assert name == "中文.html"
+        assert mime == "text/html"
+        assert path.read_bytes() == "<h1>中文</h1>".encode()
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def test_download_to_temp_http_failure_is_concise():
+    import cfbed.core as core
+    error = urllib.error.HTTPError("https://example.test/missing", 404, "Not Found", {}, None)
+    original = core.urllib.request.urlopen
+    core.urllib.request.urlopen = lambda request: (_ for _ in ()).throw(error)
+    try:
+        with pytest.raises(CfbedError, match="download failed: HTTP 404"):
+            download_to_temp("https://example.test/missing")
+    finally:
+        core.urllib.request.urlopen = original

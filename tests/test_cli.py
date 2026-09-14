@@ -1,4 +1,5 @@
 import io
+import json
 import sys
 
 import pytest
@@ -226,3 +227,40 @@ def test_list_human_alias_is_a_normal_usage_error(capsys):
     assert "Error: No such option: --human" in combined
     assert "Traceback" not in combined
     assert "NoSuchOption" not in combined
+
+
+def test_upload_content_mode_reads_utf8_and_cleans_temp(monkeypatch, tmp_path, capsys):
+    seen = {}
+
+    class FakeUploadClient:
+        def __init__(self, *args): pass
+
+        def upload(self, path, directory, filename, name_type, channel, **kwargs):
+            seen.update(path=path, directory=directory, filename=filename, body=path.read_bytes(), kwargs=kwargs)
+            return {"source_file": kwargs["source_file"], "size": len(seen["body"])}
+
+    monkeypatch.setattr(cli, "credentials", lambda: ("https://api.test", None))
+    monkeypatch.setattr(cli, "Client", FakeUploadClient)
+    assert cli.main(["upload", "页面.html", "--content", "<h1>你好</h1>", "--directory", "static-sites", "--format", "json"]) == 0
+    assert seen["filename"] == "页面.html"
+    assert seen["body"] == "<h1>你好</h1>".encode()
+    assert not seen["path"].exists()
+    assert json.loads(capsys.readouterr().out)["source_file"] == "页面.html"
+
+
+def test_upload_content_stdin_mode_is_real_cli_boundary(monkeypatch, capsys):
+    seen = {}
+
+    class FakeUploadClient:
+        def __init__(self, *args): pass
+
+        def upload(self, path, directory, filename, name_type, channel, **kwargs):
+            seen.update(filename=filename, body=path.read_bytes())
+            return {"size": len(seen["body"])}
+
+    monkeypatch.setattr(cli, "credentials", lambda: ("https://api.test", None))
+    monkeypatch.setattr(cli, "Client", FakeUploadClient)
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO("<main>你好\n世界</main>"))
+    assert cli.main(["upload", "site.html", "--content", "-"]) == 0
+    assert seen == {"filename": "site.html", "body": "<main>你好\n世界</main>".encode()}
+    assert '"size"' in capsys.readouterr().out
