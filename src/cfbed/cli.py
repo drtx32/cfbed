@@ -178,7 +178,8 @@ def _run(action, fmt: str = "human") -> None:
             print(json.dumps({"error": str(exc), "code": getattr(exc, "code", 1)}), file=sys.stderr)
         else:
             print(f"cfbed: {exc}", file=sys.stderr)
-        raise typer.Exit(code=getattr(exc, "code", 1))
+        setattr(exc, "_cfbed_rendered", True)
+        raise
 
 
 def _client() -> tuple[str, Optional[str], Client]:
@@ -564,7 +565,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
     except (CfbedError, OSError, ValueError) as exc:
         code = getattr(exc, "code", 1)
-        print(f"cfbed: {exc}", file=sys.stderr)
+        if not getattr(exc, "_cfbed_rendered", False):
+            print(f"cfbed: {exc}", file=sys.stderr)
         return code
     return 0
 
