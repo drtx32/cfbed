@@ -2,8 +2,13 @@ import io
 import sys
 
 import pytest
+from typer.testing import CliRunner
 
 from cfbed import cli
+from cfbed.cli import app
+
+
+runner = CliRunner()
 
 
 def test_set_token_uses_hidden_prompt(monkeypatch):
@@ -42,11 +47,11 @@ def test_set_token_rejects_duplicate_forms(monkeypatch, capsys):
     assert "specify the token once" in capsys.readouterr().err
 
 
-def test_set_token_help_documents_optional_token(capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["auth", "set-token", "--help"])
-    assert exc.value.code == 0
-    output = capsys.readouterr().out
+def test_set_token_help_documents_optional_token():
+    assert cli.main(["auth", "set-token", "--help"]) == 0
+    result = runner.invoke(app, ["auth", "set-token", "--help"])
+    assert result.exit_code == 0
+    output = result.stdout
     assert "[token]" in output
     assert "deprecated" in output
 
@@ -89,3 +94,31 @@ def test_text_get_remains_text(monkeypatch, capsys):
 
     assert cli.main(["get", "daily.md"]) == 0
     assert capsys.readouterr().out == "# 每日复盘"
+
+
+def test_top_level_help_has_sections_and_descriptions():
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "Usage:" in result.stdout
+    assert "Options:" in result.stdout
+    assert "Commands:" in result.stdout
+    for command in ("config", "auth", "upload", "list", "info", "get", "url", "move", "rename", "delete", "doctor"):
+        assert command in result.stdout
+
+
+def test_representative_nested_help_is_documented():
+    for args, expected in (
+        (("config", "--help"), "set-base-url"),
+        (("auth", "set-token", "--help"), "--token"),
+        (("upload", "--help"), "--directory"),
+        (("get", "--help"), "--output"),
+    ):
+        result = runner.invoke(app, list(args))
+        assert result.exit_code == 0
+        assert expected in result.stdout
+
+
+def test_version():
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert result.stdout.strip() == "0.1.0"
