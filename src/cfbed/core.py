@@ -245,7 +245,8 @@ class Client:
         _, _, raw = self.request("POST", "/upload", body, {"Content-Type": f"multipart/form-data; boundary={boundary}"}, {"returnFormat": return_format, "uploadChannel": channel, "uploadNameType": name_type, "uploadFolder": directory})
         result = json.loads(raw)
         item = result[0] if isinstance(result, list) and result else result
-        public = item.get("publicUrl") or (self.base_url + item.get("src", ""))
+        src = item.get("src", "")
+        public = item.get("publicUrl") or (src if urllib.parse.urlsplit(src).scheme else self.base_url + src)
         return {"source_file": source_file or str(file), "directory": directory, "stored_name": item.get("src"), "public_url": public, "encoded_url": encoded_url(public), "content_type": content_type, "size": len(payload)}
 
     def download(self, path: str):

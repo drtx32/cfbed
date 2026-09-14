@@ -27,6 +27,21 @@ def test_upload_contract(tmp_path):
     assert "uploadNameType=origin" in seen["url"]
     assert "你好 file.html".encode() in seen["body"] and "uploadFolder=static-sites" in seen["url"]
 
+
+def test_upload_full_src_is_not_prefixed_twice(tmp_path):
+    file = tmp_path / "report.md"
+    file.write_text("report")
+
+    class Response:
+        status = 200
+        headers = {}
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self): return b'[{"src":"https://cdn.test/report.md"}]'
+
+    result = Client("https://api.test", None, lambda request: Response()).upload(file)
+    assert result["public_url"] == "https://cdn.test/report.md"
+
 def test_mcp_image_shape():
     class Response:
         status=200; headers={"Content-Type":"image/webp"}
