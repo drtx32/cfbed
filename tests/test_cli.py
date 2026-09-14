@@ -171,3 +171,43 @@ def test_invalid_cli_input_has_no_traceback(capsys, argv, expected):
     assert expected in combined
     assert "Traceback" not in combined
     assert "Usage:" in combined
+
+
+class FakeListClient:
+    def __init__(self, *args):
+        pass
+
+    def list(self, path=None):
+        return [
+            {"name": "docs", "type": "directory", "modified": "2026-09-14"},
+            {"name": "readme.md", "mime": "text/markdown", "size": 42, "modified": "2026-09-13"},
+        ]
+
+
+def test_list_human_is_a_rich_table_and_json_contract_is_unchanged(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "credentials", lambda: ("https://api.test", None))
+    monkeypatch.setattr(cli, "Client", FakeListClient)
+
+    assert cli.main(["list"]) == 0
+    human = capsys.readouterr().out
+    assert "Name" in human
+    assert "Type/MIME" in human
+    assert "Size" in human
+    assert "Modified" in human
+    assert "📁 docs" in human
+    assert "📄 readme.md" in human
+    assert not human.lstrip().startswith("[")
+
+    assert cli.main(["list", "--format", "json"]) == 0
+    machine = capsys.readouterr().out
+    assert '"name": "readme.md"' in machine
+    assert machine.lstrip().startswith("[")
+
+
+def test_list_human_alias_is_a_normal_usage_error(capsys):
+    assert cli.main(["list", "--human"]) == 2
+    output = capsys.readouterr()
+    combined = output.out + output.err
+    assert "Error: No such option: --human" in combined
+    assert "Traceback" not in combined
+    assert "NoSuchOption" not in combined
