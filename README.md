@@ -46,6 +46,8 @@ cfbed delete archive/final.pdf
 
 `upload` returns `source_file`, `directory`, `stored_name`, `public_url` exactly as returned by ImgBed (or its documented `src` fallback), `encoded_url`, `content_type`, and `size`. URL encoding applies to path segments only, so schemes, hosts, and query strings remain intact. `--name-type`, `--channel`, and `--directory` are command flags, not persistent defaults.
 
+The CLI is built with [Typer](https://typer.tiangolo.com/), so `cfbed --help`, `cfbed <command> --help`, and `cfbed <group> <sub> --help` all render a Rich-formatted Usage / Options / Commands screen with one-line descriptions for every flag.
+
 ## Output contracts
 
 `--format human` is for people, `--format json` emits deterministic JSON, and `--format mcp` emits an envelope shaped as `{ "result": { "content": [...] } }`. Text-like downloads are printed as UTF-8 text. Binary downloads default to a file named from the server's `Content-Disposition` or URL path and report the saved path; `--output` selects a path explicitly. `--stdout` is an explicit raw-byte mode and refuses to write when stdout is a TTY, so it is safe for piping or redirection. Image downloads use an MCP image block with the response MIME type and base64 data; other binary files use a resource reference and are never coerced into text. External agent gateways can consume this machine-readable/MCP-formatted output without being a dependency of this project.

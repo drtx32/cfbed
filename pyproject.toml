@@ -9,7 +9,7 @@ description = "CLI for the CloudFlare ImgBed API with secure local credentials, 
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
-dependencies = ["cryptography>=42"]
+dependencies = ["cryptography>=42", "typer>=0.16", "rich>=13.7"]
 
 [project.scripts]
 cfbed = "cfbed.cli:main"
