@@ -26,6 +26,7 @@ import getpass
 import json
 import sys
 import urllib.parse
+from datetime import datetime, timezone
 from email.message import Message
 from pathlib import Path
 from typing import List, Optional
@@ -75,12 +76,32 @@ def emit(value, fmt: str = "human") -> None:
         print(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2))
 
 
+def _entry_value(entry: dict, *keys):
+    for key in keys:
+        value = entry.get(key)
+        if value is not None and value != "":
+            return value
+    metadata = entry.get("metadata")
+    if isinstance(metadata, dict):
+        for key in keys:
+            value = metadata.get(key)
+            if value is not None and value != "":
+                return value
+    return None
+
+
 def _list_entries(value) -> list[dict]:
-    """Extract list entries while leaving the API response untouched for JSON."""
+    """Flatten the API's directory/file response for human rendering only."""
+    if isinstance(value, dict) and ("directories" in value or "files" in value):
+        entries = [{"name": item, "_directory": True} for item in value.get("directories", []) if isinstance(item, str)]
+        files = value.get("files", [])
+        if isinstance(files, list):
+            entries.extend(item if isinstance(item, dict) else {"name": str(item)} for item in files)
+        return entries
     if isinstance(value, list):
         return [entry if isinstance(entry, dict) else {"name": str(entry)} for entry in value]
     if isinstance(value, dict):
-        for key in ("entries", "items", "files", "data", "result"):
+        for key in ("entries", "items", "data", "result"):
             nested = value.get(key)
             if isinstance(nested, list):
                 return [entry if isinstance(entry, dict) else {"name": str(entry)} for entry in nested]
@@ -88,40 +109,51 @@ def _list_entries(value) -> list[dict]:
     return [{"name": str(value)}]
 
 
-def _entry_value(entry: dict, *keys):
-    for key in keys:
-        value = entry.get(key)
-        if value is not None and value != "":
-            return value
-    return None
+def _format_size(value) -> str:
+    try:
+        size = float(value)
+    except (TypeError, ValueError):
+        return str(value) if value not in (None, "") else "—"
+    if size < 1024:
+        return f"{int(size)} B"
+    for unit in ("KB", "MB", "GB", "TB"):
+        size /= 1024
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f} {unit}"
+    return str(value)
 
 
-def _render_list_human(value) -> None:
-    """Render list results as a compact table, showing only supplied metadata."""
+def _format_uploaded(value) -> str:
+    if value in (None, ""):
+        return "—"
+    try:
+        timestamp = float(value)
+        if timestamp > 10_000_000_000:
+            timestamp /= 1000
+        return datetime.fromtimestamp(timestamp, timezone.utc).isoformat(timespec="seconds")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return str(value)
+
+
+def _render_list_human(value, path: Optional[str] = None) -> None:
+    """Render list results as a human-readable table, never as JSON."""
     entries = _list_entries(value)
-    columns = ["Name"]
-    if any(_entry_value(e, "type", "kind", "mime", "mime_type", "content_type", "contentType") is not None for e in entries):
-        columns.append("Type/MIME")
-    if any(_entry_value(e, "size", "bytes", "content_length", "contentLength") is not None for e in entries):
-        columns.append("Size")
-    if any(_entry_value(e, "modified", "modified_at", "modifiedAt", "updated_at", "updatedAt", "last_modified", "lastModified") is not None for e in entries):
-        columns.append("Modified")
-
-    table = Table(*columns, show_header=True, header_style="bold cyan", expand=False)
+    requested_path = "/" + (path or "").strip("/")
+    if requested_path != "/":
+        requested_path += "/"
+    Console(file=sys.stdout, force_terminal=False, color_system=None).print(f"Path: {requested_path}")
+    table = Table("Type", "Name", "Size", "Uploaded", show_header=True, header_style="bold cyan", expand=False)
     for entry in entries:
-        is_directory = _entry_value(entry, "is_dir", "isDir", "directory", "folder") is True
-        entry_type = _entry_value(entry, "type", "kind")
+        is_directory = entry.get("_directory") is True or _entry_value(entry, "is_dir", "isDir", "directory", "folder") is True
+        entry_type = _entry_value(entry, "type", "kind", "FileType")
         is_directory = is_directory or str(entry_type).lower() in {"dir", "directory", "folder"}
-        name = _entry_value(entry, "name", "path", "key", "src") or ""
-        name = ("📁 " if is_directory else "📄 ") + str(name)
-        row = [name]
-        if "Type/MIME" in columns:
-            row.append(str(_entry_value(entry, "mime", "mime_type", "content_type", "contentType", "type", "kind") or ""))
-        if "Size" in columns:
-            row.append(str(_entry_value(entry, "size", "bytes", "content_length", "contentLength") or ""))
-        if "Modified" in columns:
-            row.append(str(_entry_value(entry, "modified", "modified_at", "modifiedAt", "updated_at", "updatedAt", "last_modified", "lastModified") or ""))
-        table.add_row(*row)
+        name = str(_entry_value(entry, "name", "Name", "path", "Path", "key", "src") or "")
+        name = name.rstrip("/").rsplit("/", 1)[-1]
+        name = ("📁 " if is_directory else "📄 ") + name + ("/" if is_directory else "")
+        file_type = "Directory" if is_directory else str(entry_type or _entry_value(entry, "mime", "mime_type", "content_type", "contentType") or "—")
+        size = "—" if is_directory else _format_size(_entry_value(entry, "size", "Size", "bytes", "FileSizeBytes", "content_length", "contentLength"))
+        uploaded = "—" if is_directory else _format_uploaded(_entry_value(entry, "uploaded", "Uploaded", "timestamp", "TimeStamp", "created_at", "createdAt"))
+        table.add_row(file_type, name, size, uploaded)
     Console(file=sys.stdout, force_terminal=False, color_system=None).print(table)
 
 
@@ -271,7 +303,7 @@ def list_files(
     def action() -> None:
         result = _client()[2].list(path)
         if fmt == "human":
-            _render_list_human(result)
+            _render_list_human(result, path)
         else:
             emit(result, fmt)
     _run(action, fmt)
