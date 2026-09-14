@@ -14,11 +14,17 @@ uv tool install .
 
 ```bash
 cfbed config set-base-url https://your-imgbed.example
-cfbed auth set-token                 # reads token from stdin; never echoes it
+cfbed auth set-token                 # hidden interactive prompt; never echoes it
+printf '%s' "$TOKEN" | cfbed auth set-token  # safe non-interactive setup
 cfbed config show                    # never prints the token
 cfbed doctor --format json
 cfbed auth clear
 ```
+
+For convenience, `cfbed auth set-token TOKEN` is also supported, but token values
+in command arguments can be exposed in shell history and process listings. The
+older `cfbed auth set-token --token TOKEN` form remains available temporarily
+for compatibility and is deprecated; prefer the hidden prompt or stdin.
 
 Configuration is stored under `~/.cache/cfbed/` with mode `0700`. The token is encrypted with AES-256-GCM and the local key is separately mode `0600`; a system keyring can be integrated by deployments that provide one. `CFBED_BASE_URL` and `CFBED_API_TOKEN` are supported only as ephemeral/CI overrides.
 

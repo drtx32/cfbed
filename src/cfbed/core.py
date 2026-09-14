@@ -12,10 +12,12 @@ import urllib.request
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from . import __version__
 
 CONFIG_DIR = Path(os.environ.get("CFBED_CONFIG_DIR", Path.home() / ".cache" / "cfbed"))
 CONFIG_FILE = CONFIG_DIR / "config.json"
 KEY_FILE = CONFIG_DIR / "secret.key"
+USER_AGENT = f"cfbed/{__version__} (+https://github.com/drtx32/cfbed)"
 
 
 class CfbedError(Exception):
@@ -129,7 +131,7 @@ class Client:
         query_string = urllib.parse.urlencode({k: v for k, v in query.items() if v is not None})
         if query_string:
             url += "?" + query_string
-        req_headers = {"Accept": "application/json", **(headers or {})}
+        req_headers = {"Accept": "application/json", "User-Agent": USER_AGENT, **(headers or {})}
         if self.token:
             req_headers["Authorization"] = f"Bearer {self.token}"
         request = urllib.request.Request(url, data=data, headers=req_headers, method=method)

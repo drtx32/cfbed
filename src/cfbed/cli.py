@@ -1,5 +1,5 @@
 from __future__ import annotations
-import argparse, base64, json, mimetypes, sys
+import argparse, base64, getpass, json, mimetypes, sys
 from pathlib import Path
 from . import __version__
 from .core import Client, CfbedError, config_public, credentials, clear_token, encoded_url, set_base_url, set_token
@@ -15,7 +15,15 @@ def parser():
     c=sub.add_parser("config"); cs=c.add_subparsers(dest="config_command", required=True)
     x=cs.add_parser("set-base-url"); x.add_argument("url")
     cs.add_parser("show")
-    a=sub.add_parser("auth"); ass=a.add_subparsers(dest="auth_command", required=True); t=ass.add_parser("set-token"); t.add_argument("--token"); ass.add_parser("clear")
+    a=sub.add_parser("auth"); ass=a.add_subparsers(dest="auth_command", required=True)
+    t=ass.add_parser(
+        "set-token",
+        help="set the token (prompt securely, or read it from stdin when non-interactive)",
+        description="Set the API token. With no token argument, prompt securely on a TTY or read stdin when non-interactive.",
+    )
+    t.add_argument("token_value", nargs="?", metavar="token", help="token value (visible in shell history/process listings)")
+    t.add_argument("--token", dest="token_option", metavar="TOKEN", help="deprecated: provide the token as an option")
+    ass.add_parser("clear")
     u=sub.add_parser("upload"); u.add_argument("file", type=Path); u.add_argument("--directory"); u.add_argument("--filename"); u.add_argument("--name-type", choices=["default","origin","index","short"]); u.add_argument("--channel"); u.add_argument("--format", choices=["human","json","mcp"], default="human")
     for name in ["info","get","url","delete"]:
         x=sub.add_parser(name); x.add_argument("path"); x.add_argument("--format", choices=["human","json","mcp"], default="human")
@@ -37,7 +45,14 @@ def main(argv=None):
             return 0
         if args.command == "auth":
             if args.auth_command == "clear": clear_token(); emit({"token_set":False}, "json")
-            else: set_token(args.token or sys.stdin.read().strip()); emit({"token_set":True}, "json")
+            else:
+                if args.token_value is not None and args.token_option is not None:
+                    raise CfbedError("specify the token once, either as an argument or with --token")
+                token = args.token_value if args.token_value is not None else args.token_option
+                if token is None:
+                    token = getpass.getpass("Token: ") if sys.stdin.isatty() else sys.stdin.read().strip()
+                set_token(token)
+                emit({"token_set":True}, "json")
             return 0
         base, token = credentials(); client=Client(base, token)
         if args.command == "upload": emit(client.upload(args.file, args.directory, args.filename, args.name_type, args.channel), args.format); return 0
