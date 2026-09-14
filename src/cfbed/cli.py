@@ -31,6 +31,11 @@ from pathlib import Path
 from typing import List, Optional
 
 import typer
+from typer._click.exceptions import (
+    ClickException,
+    NoArgsIsHelpError,
+    UsageError,
+)
 
 from . import __version__
 from .core import (
@@ -411,6 +416,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         if code is None:
             code = getattr(exc, "code", 0)
         return int(code or 0)
+    except NoArgsIsHelpError as exc:
+        # With standalone_mode=False Typer does not render this normal help
+        # flow itself; it propagates the parser exception to the caller.
+        # Render it through Click's normal formatter instead of Rich's
+        # pretty-exception traceback.  This also covers nested groups.
+        exc.show()
+        return 0
+    except UsageError as exc:
+        # Missing arguments, unknown commands/options, and bad parameter
+        # values are all ordinary CLI usage errors and should keep Click's
+        # usage/error/exit-code contract.
+        exc.show()
+        return int(exc.exit_code)
+    except ClickException as exc:
+        exc.show()
+        return int(exc.exit_code)
+    except typer.Abort:
+        print("Aborted!", file=sys.stderr)
+        return 1
     except (CfbedError, OSError, ValueError) as exc:
         code = getattr(exc, "code", 1)
         print(f"cfbed: {exc}", file=sys.stderr)

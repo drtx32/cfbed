@@ -122,3 +122,52 @@ def test_version():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
     assert result.stdout.strip() == "0.1.0"
+
+
+@pytest.mark.parametrize("argv", [[], ["config"], ["auth"]])
+def test_bare_groups_render_help_without_traceback(capsys, argv):
+    assert cli.main(argv) == 0
+    output = capsys.readouterr()
+    combined = output.out + output.err
+    assert "Usage:" in combined
+    assert "Traceback" not in combined
+    assert "NoArgsIsHelpError" not in combined
+
+
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        (["upload"], "Missing argument 'file'"),
+        (["info"], "Missing argument 'path'"),
+        (["url"], "Missing argument 'path'"),
+        (["get"], "Missing argument 'path'"),
+        (["move"], "Missing argument 'src'"),
+        (["rename"], "Missing argument 'path'"),
+        (["delete"], "Missing argument 'path'"),
+        (["config", "set-base-url"], "Missing argument 'url'"),
+    ],
+)
+def test_missing_required_arguments_are_normal_usage_errors(capsys, argv, expected):
+    assert cli.main(argv) == 2
+    output = capsys.readouterr()
+    combined = output.out + output.err
+    assert expected in combined
+    assert "Traceback" not in combined
+    assert "Error" in combined
+
+
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        (["not-a-command"], "No such command"),
+        (["doctor", "--not-an-option"], "No such option"),
+        (["upload", "--name-type", "invalid", "missing.file"], "Invalid value"),
+    ],
+)
+def test_invalid_cli_input_has_no_traceback(capsys, argv, expected):
+    assert cli.main(argv) == 2
+    output = capsys.readouterr()
+    combined = output.out + output.err
+    assert expected in combined
+    assert "Traceback" not in combined
+    assert "Usage:" in combined
