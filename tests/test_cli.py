@@ -178,10 +178,13 @@ class FakeListClient:
         pass
 
     def list(self, path=None):
-        return [
-            {"name": "docs", "type": "directory", "modified": "2026-09-14"},
-            {"name": "readme.md", "mime": "text/markdown", "size": 42, "modified": "2026-09-13"},
-        ]
+        return {
+            "directories": ["static-sites", "downloads", "blog", "nsfw"],
+            "files": [
+                {"Name": "nsfw/每日复盘.mp4", "Directory": "nsfw", "metadata": {"FileType": "video/mp4", "FileSizeBytes": 38996945, "TimeStamp": 1785541047349}},
+                {"Name": "unknown.bin", "metadata": {}},
+            ],
+        }
 
 
 def test_list_human_table_is_the_tree_fallback_and_json_contract_is_unchanged(monkeypatch, capsys):
@@ -194,17 +197,26 @@ def test_list_human_table_is_the_tree_fallback_and_json_contract_is_unchanged(mo
         # Flat entries are not a useful Tree, so Table is the required
         # human-readable fallback and must never become a JSON dump.
         assert "Name" in human
-        assert "Type/MIME" in human
+        assert "Type" in human
         assert "Size" in human
-        assert "Modified" in human
-        assert "📁 docs" in human
-        assert "📄 readme.md" in human
-        assert not human.lstrip().startswith("[")
+        assert "Uploaded" in human
+        assert "Path: /" in human
+        assert "📁 static-sites/" in human
+        assert "📄 每日复盘.mp4" in human
+        assert "video/mp4" in human
+        assert "37.2 MB" in human
+        assert "unknown.bin" in human and "—" in human
+        assert not human.lstrip().startswith("{")
+
+    assert cli.main(["list", "nsfw", "--format", "human"]) == 0
+    nested = capsys.readouterr().out
+    assert "Path: /nsfw/" in nested
+    assert "nsfw/每日复盘.mp4" not in nested
 
     assert cli.main(["list", "--format", "json"]) == 0
     machine = capsys.readouterr().out
-    assert '"name": "readme.md"' in machine
-    assert machine.lstrip().startswith("[")
+    assert '"Name": "unknown.bin"' in machine
+    assert machine.lstrip().startswith("{")
 
 
 def test_list_human_alias_is_a_normal_usage_error(capsys):
