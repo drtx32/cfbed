@@ -125,6 +125,24 @@ def test_version():
     assert result.stdout.strip() == "0.1.0"
 
 
+def test_rename_builds_posix_target_for_windows_hosts(monkeypatch):
+    calls = []
+
+    class FakeRenameClient:
+        def __init__(self, *args):
+            pass
+
+        def move(self, source, target):
+            calls.append((source, target))
+            return {"success": True}
+
+    monkeypatch.setattr(cli, "credentials", lambda: ("https://api.test", "token"))
+    monkeypatch.setattr(cli, "Client", FakeRenameClient)
+
+    assert cli.main(["rename", "static-sites/A股盘后复盘_2026-09-14.html", "20260914_每日复盘.html"]) == 0
+    assert calls == [("static-sites/A股盘后复盘_2026-09-14.html", "static-sites/20260914_每日复盘.html")]
+
+
 @pytest.mark.parametrize("argv", [[], ["config"], ["auth"]])
 def test_bare_groups_render_help_without_traceback(capsys, argv):
     assert cli.main(argv) == 0

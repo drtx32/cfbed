@@ -25,6 +25,7 @@ import base64
 import getpass
 import json
 import mimetypes
+import posixpath
 import sys
 import tempfile
 import urllib.parse
@@ -503,7 +504,7 @@ def rename(
     fmt = output_format
     _run(
         lambda: emit(
-            _client()[2].move(path, str(Path(path).parent / new_name)),
+            _client()[2].move(path, posixpath.join(posixpath.dirname(path), new_name)),
             fmt,
         ),
         fmt,
