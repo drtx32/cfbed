@@ -11,6 +11,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from xml.etree import ElementTree
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from . import __version__
@@ -263,6 +264,56 @@ class Client:
         try: return json.loads(raw)
         except json.JSONDecodeError: return {"success": True}
 
-    def move(self, src, dst):
-        _, _, raw = self.request("POST", "/api/manage/move", json.dumps({"source": src, "target": dst}).encode(), {"Content-Type": "application/json"})
-        return json.loads(raw)
+class WebDavClient:
+    def __init__(self, endpoint: str, token: str | None, opener=urllib.request.urlopen):
+        self.endpoint = endpoint.rstrip("/") + "/"
+        self.token, self.opener = token, opener
+
+    def _url(self, path: str) -> str:
+        clean = path.strip("/")
+        encoded = "/".join(urllib.parse.quote(part, safe="") for part in clean.split("/")) if clean else ""
+        return self.endpoint + encoded
+
+    def request(self, method: str, path: str = "", data: bytes | None = None, headers=None):
+        request_headers = {"User-Agent": USER_AGENT, **(headers or {})}
+        if self.token:
+            request_headers["Authorization"] = f"Bearer {self.token}"
+        request = urllib.request.Request(self._url(path), data=data, headers=request_headers, method=method)
+        try:
+            with self.opener(request) as response:
+                body = response.read()
+                if response.status >= 400:
+                    raise _api_error(response.status, response.headers, body)
+                return response.status, dict(response.headers), body
+        except urllib.error.HTTPError as exc:
+            raise _api_error(exc.code, exc.headers or {}, exc.read())
+        except urllib.error.URLError as exc:
+            raise CfbedError(f"WebDAV network error: {exc.reason}", 2)
+
+    def options(self) -> dict:
+        status, headers, _ = self.request("OPTIONS")
+        allow = tuple(sorted({item.strip().upper() for item in headers.get("Allow", "").split(",") if item.strip()}))
+        dav = tuple(sorted({item.strip() for item in headers.get("DAV", "").split(",") if item.strip()}))
+        return {"status": status, "allow": allow, "dav": dav}
+
+    def propfind(self, path: str = "") -> dict:
+        status, headers, body = self.request("PROPFIND", path, b"<?xml version=\"1.0\"?><propfind xmlns=\"DAV:\"><prop><resourcetype/><getcontentlength/><getetag/></prop></propfind>", {"Depth": "0", "Content-Type": "application/xml"})
+        is_collection = b"<collection" in body.lower() or b":collection" in body.lower()
+        length = None
+        for element in ElementTree.fromstring(body).iter():
+            if element.tag.rsplit("}", 1)[-1] == "getcontentlength" and element.text:
+                try: length = int(element.text)
+                except ValueError: pass
+        return {"status": status, "headers": headers, "body": body, "is_collection": is_collection, "length": length}
+
+    def read(self, path: str) -> tuple[int, dict, bytes]:
+        return self.request("GET", path, headers={"Accept": "*/*"})
+
+    def put(self, path: str, body: bytes, content_type: str | None = None) -> tuple[int, dict, bytes]:
+        return self.request("PUT", path, body, {"Content-Type": content_type or "application/octet-stream"})
+
+    def delete(self, path: str) -> tuple[int, dict, bytes]:
+        return self.request("DELETE", path)
+
+    def mkdir(self, path: str) -> tuple[int, dict, bytes]:
+        return self.request("MKCOL", path)

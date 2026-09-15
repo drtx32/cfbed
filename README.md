@@ -18,6 +18,7 @@ cfbed auth set-token                 # hidden interactive prompt; never echoes i
 printf '%s' "$TOKEN" | cfbed auth set-token  # safe non-interactive setup
 cfbed config show                    # never prints the token
 cfbed doctor --format json
+cfbed webdav doctor --format json    # OPTIONS/PROPFIND capability probe
 cfbed auth clear
 ```
 
@@ -42,9 +43,8 @@ cfbed get image/猫 图.png --format mcp
 cfbed get video/demo.mp4                  # saves video/demo.mp4 in the current directory
 cfbed get video/demo.mp4 --output demo.mp4
 cfbed get video/demo.mp4 --stdout > demo.mp4
-cfbed move old/name.pdf archive/name.pdf
-cfbed rename archive/name.pdf final.pdf
-cfbed delete archive/final.pdf
+cfbed mkdir archive/2026                       # [WebDAV]
+cfbed delete archive/final.pdf                 # [REST]
 ```
 
 `upload` returns `source_file`, `directory`, `stored_name`, `public_url` exactly as returned by ImgBed (or its documented `src` fallback), `encoded_url`, `content_type`, and `size`. URL encoding applies to path segments only, so schemes, hosts, and query strings remain intact. `--name-type`, `--channel`, and `--directory` are command flags, not persistent defaults.
@@ -59,4 +59,8 @@ The CLI is built with [Typer](https://typer.tiangolo.com/), so `cfbed --help`, `
 
 Exit code `0` means success, `1` means local validation/configuration failure, and `2` means an API or network failure. Errors in JSON mode are written to stderr and contain `error` and `code`; tokens are never included.
 
-The implementation follows the official [ImgBed upload](https://cfbed.sanyue.de/api/upload.html) and [read](https://cfbed.sanyue.de/api/file.html) API documentation.
+The implementation follows the official [ImgBed upload](https://cfbed.sanyue.de/api/upload.html), [read](https://cfbed.sanyue.de/api/file.html), and [WebDAV](https://cfbed.sanyue.de/api/webdav.html) documentation.
+
+File upload/list/read/delete use the `[REST]` channel. The `mkdir` command and
+`webdav doctor` use the official WebDAV endpoint `<base-url>/dav/`; the doctor
+reports the server's advertised methods without assuming unsupported methods.

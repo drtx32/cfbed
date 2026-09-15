@@ -2,7 +2,7 @@ import json
 import urllib.error
 from pathlib import Path
 import pytest
-from cfbed.core import Client, CfbedError, classify_response, download_to_temp, encoded_url, encrypt_token, decrypt_token, USER_AGENT
+from cfbed.core import Client, CfbedError, WebDavClient, classify_response, download_to_temp, encoded_url, encrypt_token, decrypt_token, USER_AGENT
 
 def test_encoded_url_only_encodes_path():
     assert encoded_url("https://x.test/a folder/猫.png?q=a b") == "https://x.test/a%20folder/%E7%8C%AB.png?q=a b"
@@ -66,6 +66,33 @@ def test_requests_include_project_user_agent():
 
     Client("https://api.test", None, opener).request("GET", "/api/manage/list")
     assert seen["User-agent"] == USER_AGENT
+
+
+def test_webdav_options_and_propfind():
+    calls = []
+    body = b"probe content"
+    propfind = b"<?xml version='1.0'?><multistatus xmlns='DAV:'><response><propstat><prop><resourcetype/><getcontentlength>13</getcontentlength></prop></propstat></response></multistatus>"
+
+    class Response:
+        def __init__(self, status=200, headers=None, payload=b""):
+            self.status, self.headers, self.payload = status, headers or {}, payload
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self): return self.payload
+
+    def opener(request):
+        calls.append((request.method, request.full_url, dict(request.headers)))
+        if request.method == "OPTIONS":
+            return Response(headers={"Allow": "OPTIONS, GET, PUT, DELETE, PROPFIND, MKCOL"})
+        if request.method == "PROPFIND":
+            return Response(status=207, headers={"Content-Type": "application/xml"}, payload=propfind)
+        return Response(headers={"Content-Type": "text/plain"}, payload=body)
+
+    client = WebDavClient("https://dav.test/dav/", "token", opener)
+    assert client.options()["allow"] == ("DELETE", "GET", "MKCOL", "OPTIONS", "PROPFIND", "PUT")
+    assert client.propfind("a.txt")["status"] == 207
+    assert [method for method, _, _ in calls] == ["OPTIONS", "PROPFIND"]
+    assert calls[0][2]["Authorization"] == "Bearer token"
 
 
 def test_binary_http_error_never_decodes_body():

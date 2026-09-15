@@ -25,7 +25,6 @@ import base64
 import getpass
 import json
 import mimetypes
-import posixpath
 import sys
 import tempfile
 import urllib.parse
@@ -54,6 +53,7 @@ from .core import (
     encoded_url,
     set_base_url,
     set_token,
+    WebDavClient,
     download_to_temp,
 )
 
@@ -68,8 +68,10 @@ app = typer.Typer(
 )
 config_app = typer.Typer(help="本地 endpoint 与配置管理。", no_args_is_help=True)
 auth_app = typer.Typer(help="API token 管理（token 只在本地加密保存）。", no_args_is_help=True)
+webdav_app = typer.Typer(help="[WebDAV] 文件管理与能力探测。", no_args_is_help=True)
 app.add_typer(config_app, name="config")
 app.add_typer(auth_app, name="auth")
+app.add_typer(webdav_app, name="webdav")
 
 
 def emit(value, fmt: str = "human") -> None:
@@ -290,7 +292,7 @@ def upload(
         help=_format_option(),
     ),
 ) -> None:
-    """上传本地文件、远程 URL，或直接上传 UTF-8 文本内容。"""
+    """[REST] 上传本地文件、远程 URL，或直接上传 UTF-8 文本内容。"""
     if name_type not in (None, "default", "origin", "index", "short"):
         raise typer.BadParameter("must be one of: default, origin, index, short", param_hint="--name-type")
     fmt = output_format
@@ -337,7 +339,7 @@ def list_files(
         "human", "--format", callback=_format_callback, help=_format_option()
     ),
 ) -> None:
-    """列出远端目录；path 接受 ImgBed 目录路径或 slash 形式。"""
+    """[REST] 列出远端目录；path 接受 ImgBed 目录路径或 slash 形式。"""
     fmt = output_format
     def action() -> None:
         result = _client()[2].list(path)
@@ -355,7 +357,7 @@ def info(
         "human", "--format", callback=_format_callback, help=_format_option()
     ),
 ) -> None:
-    """查看远端文件 metadata（HTTP status、MIME、大小和 headers）。"""
+    """[REST] 查看远端文件 metadata（HTTP status、MIME、大小和 headers）。"""
     def action() -> None:
         base, _, client = _client()
         status, headers, _ = client.request("HEAD", "/file/" + path.lstrip("/"))
@@ -380,7 +382,7 @@ def url_cmd(
         "human", "--format", callback=_format_callback, help=_format_option()
     ),
 ) -> None:
-    """解析远端文件的 public URL，可选返回安全编码后的 URL。"""
+    """[REST] 解析远端文件的 public URL，可选返回安全编码后的 URL。"""
     def action() -> None:
         base, _, _ = _client()
         value = (
@@ -402,7 +404,7 @@ def get(
         "human", "--format", callback=_format_callback, help=_format_option()
     ),
 ) -> None:
-    """读取或下载远端内容；二进制默认保存到文件，文本按 UTF-8 输出。"""
+    """[REST] 读取或下载远端内容；二进制默认保存到文件，文本按 UTF-8 输出。"""
     def action() -> None:
         base, _, client = _client()
         _, headers, body = client.download(path)
@@ -479,36 +481,14 @@ def get(
     _run(action, fmt)
 
 
-@app.command("move")
-def move(
-    src: str = typer.Argument(..., help="源文件/目录 path 或 id。"),
-    dst: str = typer.Argument(..., help="目标文件/目录 path 或 id。"),
-    output_format: str = typer.Option(
-        "human", "--format", callback=_format_callback_hj, help="输出格式：human 或 json。"
-    ),
+@app.command("mkdir")
+def mkdir(
+    path: str = typer.Argument(..., help="要创建的远端目录路径。"),
+    output_format: str = typer.Option("human", "--format", callback=_format_callback_hj, help="输出格式：human 或 json。"),
 ) -> None:
-    """移动远端文件或目录。"""
+    """[WebDAV] 创建远端目录（MKCOL）。"""
     fmt = output_format
-    _run(lambda: emit(_client()[2].move(src, dst), fmt), fmt)
-
-
-@app.command("rename")
-def rename(
-    path: str = typer.Argument(..., help="要重命名的远端文件/目录 path 或 id。"),
-    new_name: str = typer.Argument(..., help="新的 basename。"),
-    output_format: str = typer.Option(
-        "human", "--format", callback=_format_callback_hj, help="输出格式：human 或 json。"
-    ),
-) -> None:
-    """在原目录中重命名远端文件或目录。"""
-    fmt = output_format
-    _run(
-        lambda: emit(
-            _client()[2].move(path, posixpath.join(posixpath.dirname(path), new_name)),
-            fmt,
-        ),
-        fmt,
-    )
+    _run(lambda: emit({"transport": "WebDAV MKCOL", "path": path, "status": _webdav_client().mkdir(path)[0]}, fmt), fmt)
 
 
 @app.command("delete")
@@ -518,7 +498,7 @@ def delete(
         "human", "--format", callback=_format_callback, help=_format_option()
     ),
 ) -> None:
-    """删除远端文件或目录，并返回 API 结果。"""
+    """[REST] 删除远端文件或目录，并返回 API 结果。"""
     fmt = output_format
     _run(lambda: emit(_client()[2].delete(path), fmt), fmt)
 
@@ -529,9 +509,51 @@ def doctor(
         "human", "--format", callback=_format_callback_hj, help="输出格式：human 或 json。"
     ),
 ) -> None:
-    """检查本地 endpoint 与 token 状态，不发起远端写操作。"""
+    """检查 [REST] endpoint 与 token 状态，不发起远端写操作。"""
     fmt = output_format
     _run(lambda: emit({"base_url": _client()[0], "token_set": bool(_client()[1])}, fmt), fmt)
+
+
+def _webdav_client() -> WebDavClient:
+    base, token = credentials()
+    return WebDavClient(base + "/dav/", token)
+
+
+@webdav_app.command("doctor")
+def webdav_doctor(
+    output_format: str = typer.Option("human", "--format", callback=_format_callback_hj, help="输出格式：human 或 json。"),
+) -> None:
+    """[WebDAV] 执行 OPTIONS/PROPFIND 能力探测，不执行写操作。"""
+    fmt = output_format
+    def action() -> None:
+        endpoint = _client()[0] + "/dav/"
+        client = _webdav_client()
+        options_error = None
+        try:
+            options = client.options()
+        except CfbedError as exc:
+            options = {"status": None, "allow": (), "dav": ()}
+            options_error = str(exc)
+        propfind_status = None
+        propfind_error = None
+        if options_error is None:
+            try:
+                propfind_status = client.propfind()["status"]
+            except CfbedError as exc:
+                propfind_error = str(exc)
+        emit({
+            "endpoint": endpoint,
+            "configured": bool(_client()[1]),
+            "authentication": "api_token" if _client()[1] else "not_configured",
+            "enabled": options["status"] is not None and options["status"] < 400,
+            "options_status": options["status"],
+            "propfind_status": propfind_status,
+            "allow": options["allow"],
+            "dav": options["dav"],
+            "options_error": options_error,
+            "propfind_error": propfind_error,
+        }, fmt)
+    _run(action, fmt)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
